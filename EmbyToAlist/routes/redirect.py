@@ -4,7 +4,7 @@ from loguru import logger
 from ..config import CACHE_ENABLE, INITIAL_CACHE_SIZE_OF_TAIL, HIGH_COMPAT_MEDIA_CLIENTS, RAW_LINK_PROVIDER
 from ..models import FileInfo, ItemInfo, RequestInfo, CacheRangeStatus, RangeInfo, response_headers_template
 from ..utils.path import check_file_path
-from ..utils.network import stream_handler, temporary_redirect
+from ..utils.network import stream_handler, temporary_redirect, is_alist_proxy_url, pure_reverse_proxy
 from ..utils.common import get_content_type, extract_api_key, ClientManager
 from ..providers.manager import RawLinkManager
 from ..providers.media_server.emby.items import get_item_info, get_file_info
@@ -54,6 +54,29 @@ async def redirect(item_id, filename, request: fastapi.Request):
     await raw_link_manager.create_task()
     
     if not CACHE_ENABLE:
+        raw_url = await raw_link_manager.get_raw_url()
+        if is_alist_proxy_url(raw_url):
+            logger.debug("CACHE_ENABLE is False, but URL is Alist proxy, using reverse proxy")
+            range_info_no_cache = RangeInfo(
+                request_range=(0, None),
+                cache_range=None,
+                response_range=None,
+            )
+            request_info_no_cache = RequestInfo(
+                file_info=file_info,
+                item_info=item_info,
+                raw_link_manager=raw_link_manager,
+                cache_range_status=CacheRangeStatus.NOT_CACHED,
+                api_key=api_key,
+                range_info=range_info_no_cache,
+                user_agent=request.headers.get('User-Agent'),
+            )
+            return await pure_reverse_proxy(
+                request_info=request_info_no_cache,
+                start_byte=0,
+                end_byte=None,
+                file_size=file_info.size
+            )
         return await temporary_redirect(
             raw_link_manager=raw_link_manager,
         )
@@ -63,6 +86,29 @@ async def redirect(item_id, filename, request: fastapi.Request):
         logger.warning("Range header not found")
         logger.debug(f"Request Headers: {request.headers}")
         
+        raw_url = await raw_link_manager.get_raw_url()
+        if is_alist_proxy_url(raw_url):
+            logger.debug("Range header not found, but URL is Alist proxy, using reverse proxy")
+            range_info_no_range = RangeInfo(
+                request_range=(0, None),
+                cache_range=None,
+                response_range=None,
+            )
+            request_info_no_range = RequestInfo(
+                file_info=file_info,
+                item_info=item_info,
+                raw_link_manager=raw_link_manager,
+                cache_range_status=CacheRangeStatus.NOT_CACHED,
+                api_key=api_key,
+                range_info=range_info_no_range,
+                user_agent=request.headers.get('User-Agent'),
+            )
+            return await pure_reverse_proxy(
+                request_info=request_info_no_range,
+                start_byte=0,
+                end_byte=None,
+                file_size=file_info.size
+            )
         return await temporary_redirect(
             raw_link_manager=raw_link_manager,
         )
@@ -155,9 +201,21 @@ async def redirect(item_id, filename, request: fastapi.Request):
     else:
         logger.debug("Not match any cache condition")
         request_info.cache_range_status = CacheRangeStatus.NOT_CACHED
-        return await temporary_redirect(
-            raw_link_manager=raw_link_manager,
-        )
+        
+        raw_url = await raw_link_manager.get_raw_url()
+        if is_alist_proxy_url(raw_url):
+            logger.debug("Using reverse proxy for Alist proxy URL")
+            return await pure_reverse_proxy(
+                request_info=request_info,
+                start_byte=start_byte,
+                end_byte=end_byte,
+                file_size=file_info.size
+            )
+        else:
+            logger.debug("Using 307 redirect for external URL")
+            return await temporary_redirect(
+                raw_link_manager=raw_link_manager,
+            )
         
     response_start = start_byte
     request_info.range_info.response_range = (response_start, response_end)

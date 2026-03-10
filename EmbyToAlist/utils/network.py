@@ -1,5 +1,6 @@
 import asyncio
 from typing import AsyncGenerator, Optional, TYPE_CHECKING
+from urllib.parse import urlparse
 
 import fastapi
 import httpx
@@ -9,6 +10,7 @@ from ..models import RequestInfo, CacheRangeStatus, FileHeaders
 from ..cache.manager import AppContext
 from ..cache.system import CacheSystem
 from ..utils.common import ClientManager
+from ..config import ALIST_SERVER
 if TYPE_CHECKING:
     from ..providers.manager import RawLinkManager
 
@@ -121,7 +123,8 @@ async def stream_handler(
 async def reverse_proxy(
     request_info: RequestInfo,
     start: int,
-    end: int
+    end: int,
+    chunk_size: int = 1024 * 1024
 ) -> AsyncGenerator[bytes, None]:
     """通过直链反向代理剩余数据段"""
 
@@ -148,12 +151,17 @@ async def reverse_proxy(
     client = ClientManager.get_client()
 
     try:
-        async with client.stream("GET", raw_url, headers=headers, timeout=httpx.Timeout(10)) as response:
+        async with client.stream(
+            "GET", 
+            raw_url, 
+            headers=headers, 
+            timeout=httpx.Timeout(20, connect=30.0)
+        ) as response:
             if response.status_code not in {200, 206}:
                 logger.error(f"Reverse proxy unexpected status: {response.status_code}")
                 response.raise_for_status()
 
-            async for chunk in response.aiter_bytes():
+            async for chunk in response.aiter_bytes(chunk_size):
                 yield chunk
 
     except asyncio.CancelledError:
@@ -175,3 +183,80 @@ async def temporary_redirect(raw_link_manager: 'RawLinkManager') -> fastapi.Resp
     """
     raw_url = await raw_link_manager.get_raw_url()
     return fastapi.responses.RedirectResponse(url=raw_url, status_code=307)
+
+
+def is_alist_proxy_url(raw_url: str) -> bool:
+    """
+    检测直链是否为 Alist 本机代理链接
+    
+    Alist 本机代理链接特征：
+    1. URL 的 host 与 ALIST_SERVER 配置相同
+    2. 路径通常为 /d/... 格式
+    
+    Args:
+        raw_url (str): 直链URL
+    Returns:
+        bool: 是否为 Alist 本机代理链接
+    """
+    try:
+        raw_parsed = urlparse(raw_url)
+        alist_parsed = urlparse(ALIST_SERVER)
+        
+        raw_host = raw_parsed.netloc.lower()
+        alist_host = alist_parsed.netloc.lower()
+        
+        if raw_host == alist_host:
+            logger.debug(f"Detected Alist proxy URL: {raw_url}")
+            return True
+        
+        return False
+    except Exception as e:
+        logger.warning(f"Failed to parse URL for proxy detection: {e}")
+        return False
+
+
+async def pure_reverse_proxy(
+    request_info: RequestInfo,
+    start_byte: int,
+    end_byte: Optional[int],
+    file_size: int
+) -> fastapi.responses.StreamingResponse:
+    """
+    纯反向代理处理，用于处理不在缓存范围内的请求
+    
+    当直链为 Alist 本机代理模式时，不能使用 307 重定向，
+    必须通过本服务进行反向代理流式传输
+    
+    Args:
+        request_info: 请求信息
+        start_byte: 请求起始字节
+        end_byte: 请求结束字节（None表示到文件末尾）
+        file_size: 文件总大小
+    Returns:
+        fastapi.responses.StreamingResponse: 流式响应
+    """
+    if end_byte is None:
+        end_byte = file_size - 1
+    
+    response_headers = {
+        'Content-Type': 'application/octet-stream',
+        'Content-Range': f"bytes {start_byte}-{end_byte}/{file_size}",
+        'Content-Length': f'{end_byte - start_byte + 1}',
+        'Accept-Ranges': 'bytes',
+    }
+    
+    async def stream():
+        try:
+            async for chunk in reverse_proxy(request_info, start_byte, end_byte):
+                yield chunk
+        except asyncio.CancelledError:
+            logger.warning("Pure reverse proxy stream cancelled by client")
+            raise
+    
+    logger.info(f"Pure reverse proxy: bytes {start_byte}-{end_byte}/{file_size}")
+    
+    return fastapi.responses.StreamingResponse(
+        stream(),
+        headers=response_headers,
+        status_code=206
+    )

@@ -294,7 +294,7 @@ class CacheSystem():
             
         """
         # 防止产生过多的并发请求
-        await asyncio.sleep(100)
+        await asyncio.sleep(60)
         
         previous_item_info = request_info.item_info
         next_item_info: ItemInfo = await get_next_episode_item_info(
