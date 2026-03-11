@@ -35,6 +35,23 @@ async def redirect(item_id, filename, request: fastapi.Request):
 
     file_info: FileInfo = await get_file_info(emby_client, item_id, media_source_id)
     item_info: ItemInfo = await get_item_info(emby_client, item_id, user_id)
+
+    if file_info.is_strm and file_info.size == 0:
+        try:
+            logger.info(f"File {file_info.name} is strm and size is 0, attempting to get real size from remote.")
+            client = ClientManager.get_client()
+            # For strm files, the path is the URL
+            head_resp = await client.head(file_info.path, timeout=10, follow_redirects=True)
+            head_resp.raise_for_status()
+            content_length = head_resp.headers.get('content-length')
+            if content_length:
+                file_info.size = int(content_length)
+                logger.info(f"Successfully updated size for strm file to {file_info.size}")
+            else:
+                logger.warning("Could not get content-length from strm URL HEAD request. Seeking may not work.")
+        except Exception as e:
+            logger.error(f"Failed to get size from strm URL, playback will likely fail. Error: {e}")
+
     
     logger.info(f"Requested Item ID: {item_id}")
     logger.info("MediaFile Mount Path: " + file_info.path)
