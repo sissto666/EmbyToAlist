@@ -10,7 +10,7 @@ from ..models import RequestInfo, CacheRangeStatus, FileHeaders
 from ..cache.manager import AppContext
 from ..cache.system import CacheSystem
 from ..utils.common import ClientManager
-from ..config import ALIST_SERVER
+from ..config import ALIST_SERVER, FORCE_CLIENT_RECONNECT
 if TYPE_CHECKING:
     from ..providers.manager import RawLinkManager
 
@@ -87,6 +87,10 @@ async def stream_handler(
                 logger.debug("High compatibility client finished cache segment, ending stream")
                 if remaining_total > 0:
                     logger.warning("High compatibility client expected to finish within cache, but remaining data detected")
+                return
+
+            if FORCE_CLIENT_RECONNECT:
+                logger.info("FORCE_CLIENT_RECONNECT is enabled, ending stream to force client reconnect")
                 return
 
             reverse_start = response_start + bytes_sent
