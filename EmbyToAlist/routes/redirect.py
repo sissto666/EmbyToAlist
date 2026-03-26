@@ -169,7 +169,29 @@ async def redirect(item_id, filename, request: fastapi.Request):
     
     # 应该走缓存的情况1：请求文件开头
     cache_file_size = file_info.cache_file_size
-    if start_byte < cache_file_size:
+    
+    # 智能切换逻辑：如果 start_byte > 0 且在缓存范围内，说明这很可能是
+    # 客户端在缓存超时断开后发起的续传请求。此时我们直接跳过缓存，强制走 307/代理
+    if 0 < start_byte < cache_file_size:
+        logger.debug(f"Start byte {start_byte} > 0 but within cache size {cache_file_size}. Treating as reconnect after timeout, skipping cache.")
+        request_info.cache_range_status = CacheRangeStatus.NOT_CACHED
+        
+        raw_url = await raw_link_manager.get_raw_url()
+        if is_alist_proxy_url(raw_url):
+            logger.debug("Using reverse proxy for Alist proxy URL (reconnect)")
+            return await pure_reverse_proxy(
+                request_info=request_info,
+                start_byte=start_byte,
+                end_byte=end_byte,
+                file_size=file_info.size
+            )
+        else:
+            logger.debug("Using 307 redirect for external URL (reconnect)")
+            return await temporary_redirect(
+                raw_link_manager=raw_link_manager,
+            )
+
+    if start_byte == 0:
         logger.debug("Match cache condition 1: Requesting file start")
         request_info.range_info.cache_range = (0, cache_file_size - 1)
         

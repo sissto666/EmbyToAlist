@@ -40,6 +40,12 @@ CHUNK_SIZE_OF_CHUNKSWITER = env.int("CHUNK_SIZE_OF_CHUNKSWITER", default=200*102
 MEMORY_CACHE_ONLY = env.bool("MEMORY_CACHE_ONLY", default=False)
 """是否只使用内存缓存，默认False"""
 
+SMART_CACHE_FALLBACK = env.bool("SMART_CACHE_FALLBACK", default=True)
+"""缓存智能切换：当网络不佳导致缓存读取超时时，主动打断连接切换到302/代理，默认True"""
+
+SMART_CACHE_TIMEOUT = env.float("SMART_CACHE_TIMEOUT", default=5.0)
+"""缓存智能切换的超时时间（秒），默认5.0秒"""
+
 HIGH_COMPAT_MEDIA_CLIENTS = env.list("HIGH_COMPAT_MEDIA_CLIENTS", subcast=str, default=["mpv", "senplayer"])
 """对Range请求支持较好的播放器列表，默认mpv"""
 HIGH_COMPAT_MEDIA_CLIENTS = [client.strip().lower() for client in HIGH_COMPAT_MEDIA_CLIENTS]
