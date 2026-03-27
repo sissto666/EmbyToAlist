@@ -12,15 +12,15 @@
 - 支持 STRM
 - 少少许加快起播速度
 
-1. 花费少量本地空间开启视频开头缓存
+​    		2.花费少量本地空间开启视频开头缓存
 
-- 通过本机反向代理后端存储（需消耗本机流量）
+- 通过本机反向代理后端存储（需消耗本机流量，服务器网络不佳时，回退到302）
 - 无缓存时302重定向到文件直链
 - 初次播放后缓存视频文件开头元数据
 - 大幅加快起播速度
 - 降低播放器开始播放时对后端的请求并发数量
 - 播放剧集时自动缓存下一集
-- 实现自动识别302与本地（仅openlist）
+- 实现对openlist挂载的网盘的代理模式：302与代理，区分适配以顺利播放视频
 
 # 部署方式
 
@@ -52,72 +52,57 @@ $ python3 -m EmbyToAlist
 ## Nginx 配置
 
 ```
-  set $emby "http://127.0.0.1:8096";
-
-  # reverse proxy
-  location ~* ^/preventRedirect/(emby/)?videos/(\d*)/(stream|original).* {
-      rewrite ^/preventRedirect/(.*)$ /$1 break;
-      proxy_pass $emby;
-      #proxy_ignore_headers X-Accel-Expires Expires Cache-Control;
-      #proxy_set_header Range $slice_range;
-      proxy_set_header Host $host;
-      proxy_set_header X-Real-IP $remote_addr;
-      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-      proxy_set_header Upgrade $http_upgrade;
-      proxy_set_header Connection "";
-      add_header Strict-Transport-Security "max-age=31536000";
-      proxy_http_version 1.1;
-      add_header Cache-Control no-cache;
-      proxy_cache off;
-  }
-  # /emby/Videos/12345/xxx/Subtitles/3/0/Stream.ass?api_key=xx
-  location ~* /videos/(\d*)/(stream|original).* {
-      proxy_cache off;
-      proxy_buffering off;
-      proxy_set_header Host $http_host;
-      proxy_set_header Range $http_range;
-      proxy_set_header If-Range $http_if_range;
-      proxy_set_header X-Real-IP $remote_addr;
-      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-      proxy_set_header X-Forwarded-Proto $scheme;
-      proxy_http_version 1.1;
-      proxy_set_header Connection "";
-
-      proxy_pass http://127.0.0.1:60001;
-  }
-  # Proxy sockets traffic for jellyfin-mpv-shim and webClient
-  location ~* /(socket|embywebsocket) {
-      # Proxy emby/jellyfin Websockets traffic
-      proxy_pass $emby;
-      ## WEBSOCKET SETTINGS ## Used to pass two way real time info to and from emby and the client.
-      proxy_http_version 1.1;
-      proxy_set_header Upgrade $http_upgrade;
-      proxy_set_header Connection $http_connection;
-      proxy_set_header Host $host;
-      proxy_set_header X-Real-IP $remote_addr;
-      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-      proxy_set_header X-Forwarded-Proto $scheme;
-      proxy_set_header X-Forwarded-Protocol $scheme;
-      proxy_set_header X-Forwarded-Host $http_host;
-      proxy_connect_timeout 1h;
-      proxy_send_timeout 1h;
-      proxy_read_timeout 1h;
-      tcp_nodelay on; ## Sends data as fast as it can not buffering large chunks, saves about 200ms per request.
-  }
-  location ~ / {
-      proxy_pass $emby;
-      proxy_set_header Host $host;
-      proxy_set_header X-Real-IP $remote_addr;
-      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-      proxy_set_header REMOTE-HOST $remote_addr;
-      proxy_set_header Upgrade $http_upgrade;
-      proxy_set_header Connection "upgrade";
-      proxy_set_header X-Forwarded-Proto $scheme;
-      proxy_http_version 1.1;
-      add_header X-Cache $upstream_cache_status;
-      add_header Strict-Transport-Security "max-age=31536000";
-      proxy_cache off;
-  }
+set $emby "http://127.0.0.1:8096"; 
+    # reverse proxy
+location ~* ^/preventRedirect/(emby/)?videos/(\d*)/(stream|original).* {
+        rewrite ^/preventRedirect/(.*)$ /$1 break; 
+        proxy_pass $emby; 
+        #proxy_ignore_headers X-Accel-Expires Expires Cache-Control;
+        #proxy_set_header Range $slice_range;
+        proxy_set_header Host $host; 
+        proxy_set_header X-Real-IP $remote_addr; 
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; 
+        proxy_set_header Upgrade $http_upgrade; 
+        proxy_set_header Connection ""; 
+        add_header Strict-Transport-Security "max-age=31536000"; 
+        proxy_http_version 1.1; 
+        add_header Cache-Control no-cache; 
+        proxy_cache off; 
+    }
+    # /emby/Videos/12345/xxx/Subtitles/3/0/Stream.ass?api_key=xx
+location ~* /videos/(\d*)/(stream|original).* {
+        proxy_cache off; 
+        proxy_buffering off; 
+        proxy_set_header Host $http_host; 
+        proxy_set_header Range $http_range; 
+        proxy_set_header If-Range $http_if_range; 
+        proxy_set_header X-Real-IP $remote_addr; 
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; 
+        proxy_set_header X-Forwarded-Proto $scheme; 
+        proxy_http_version 1.1; 
+        proxy_set_header Connection ""; 
+        proxy_pass http://127.0.0.1:60001; 
+        #      add_header Referrer-Policy "no-referrer" always;
+    }
+    # Proxy sockets traffic for jellyfin-mpv-shim and webClient
+location ~* /(socket|embywebsocket) {
+        # Proxy emby/jellyfin Websockets traffic
+        proxy_pass $emby; 
+        ## WEBSOCKET SETTINGS ## Used to pass two way real time info to and from emby and the client.
+        proxy_http_version 1.1; 
+        proxy_set_header Upgrade $http_upgrade; 
+        proxy_set_header Connection $http_connection; 
+        proxy_set_header Host $host; 
+        proxy_set_header X-Real-IP $remote_addr; 
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; 
+        proxy_set_header X-Forwarded-Proto $scheme; 
+        proxy_set_header X-Forwarded-Protocol $scheme; 
+        proxy_set_header X-Forwarded-Host $http_host; 
+        proxy_connect_timeout 1h; 
+        proxy_send_timeout 1h; 
+        proxy_read_timeout 1h; 
+        tcp_nodelay on; ## Sends data as fast as it can not buffering large chunks, saves about 200ms per request.
+    }
 ```
 
 # 配置文件
@@ -138,10 +123,10 @@ $ python3 -m EmbyToAlist
 - `CACHE_NEXT_EPISODE`：布尔值，在播放剧集的时候自动缓存下一集
 - `CACHE_PATH`：字符串，缓存存放的路径。
 - `LOG_LEVEL`：日志等级
--  SMART\_CACHE\_FALLBACK：缓存智能切换，当网络不佳导致缓存读取超时时，主动打断连接切换到302/代理 &#x20;
-- SMART\_CACHE\_TIMEOUT：缓存智能切换的超时时间（秒）
-- `FORCE_CLIENT_RECONNECT`：使用缓存的时候，响应完缓存内容后强制打断客户端连接，迫使客户端重新发起请求后响应302，以在开启缓存后同时使用302减少服务端流量消耗（注：开启后每次播放反响代理必然会报错，忽视即可）。
-- `MEMORY_CACHE_ONLY`：仅在内存中缓存，不写入磁盘
+-  SMART\_CACHE\_FALLBACK：布尔值，缓存智能切换，当网络不佳导致缓存读取超时时，主动打断连接切换到302/代理 &#x20;
+- SMART\_CACHE\_TIMEOUT：浮点数，缓存智能切换的超时时间（秒）
+- `FORCE_CLIENT_RECONNECT`：布尔值，使用缓存的时候，响应完缓存内容后强制打断客户端连接，迫使客户端重新发起请求后响应302，以在开启缓存后同时使用302减少服务端流量消耗（注：开启后每次播放反响代理必然会报错，忽视即可）。
+- `MEMORY_CACHE_ONLY`：布尔值，仅在内存中缓存，不写入磁盘
 
 # 项目实现方法 & 逻辑解释
 
@@ -155,15 +140,11 @@ $ python3 -m EmbyToAlist
 
 当启用缓存后，程序将通过反向代理文件直链的方式，先响应本地缓存，之后请求直链，流式传输后续内容。该方式将会消耗本机流量，但是可以兼容所有主流播放器，是一种妥协的实现方法。
 
+当服务器网络不佳时，例如5秒内没有将本地缓存上传至客户端，则强制打断，回退到302。
+
 缓存效果：在mpv播放器上，播放存储在 Onedrive 的媒体文件，开始播放所消耗的时间：约10s -> 小于1s
 
-## 2. Rclone搭配Onedrive存储时，对文件名称中特殊字符的处理
 
-注：目前不再建议使用该项目解决 Rclone 特殊字符的问题，更加彻底有效的方法是告诉 Rclone 不要对这些特殊字符进行处理，只需在 Rclone 配置文件中对应存储的末尾添加上 `encoding = None` 即可。如果之前已经有被更改的文件名，需要手动将存储中文件名称恢复
-
-在 Rclone 文档中提到，会对特殊文件名中的特殊字符串进行处理，防止由于后端存储不兼容产生的问题。在 Rclone 中，该配置是默认开启的，会导致在特殊文件名中添加一个额外的符号，比如：**"名侦探柯南：万圣节的新娘 (2022)"** 会被处理为 **"名侦探柯南‛：万圣节的新娘 (2022)"**，但在挂载路径中文件名依旧保持不变。然而 Alist 并不会对这些文件名进行处理，就会导致本地路径中的 **"/movie/名侦探柯南：万圣节的新娘 (2022)"** 而在 Alist 中为 **"/movie/名侦探柯南‛：万圣节的新娘 (2022)"**，从而导致文件路径不一致而返回404。
-
-本程序对这种请求简单进行了处理，只需将 `convertSpecialChars` 设置为 True 后，程序会尝试将额外的符号 '*‛*' 移除。但该功能并不总是有效。
 
 # Cloudflare Cache Rule 示例配置
 
