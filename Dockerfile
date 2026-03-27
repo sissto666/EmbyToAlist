@@ -4,7 +4,7 @@ WORKDIR /app
 
 COPY . /app
 
-# Install requirements.txt
+# Install requirements.txt,如果位于国外的服务器，可以去掉-i https://pypi.tuna.tsinghua.edu.cn/simple
 RUN pip install --no-cache-dir -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
 
 # Keeps Python from generating .pyc files in the container
