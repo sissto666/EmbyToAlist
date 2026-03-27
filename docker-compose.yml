@@ -1,12 +1,11 @@
 services:
-  embytoalist:
-    image: ghcr.io/zsbai/embytoalist:latest
+  embytoalist_t:
+    image: 请自行构建，使用dockerfile
     env_file:
       - .env
     volumes:
-      - /path/to/cache_dir:/path/to/cache_dir
-    # host和port二选一
+      - /home/ubuntu/EmbyToAlist/cache:/app/cache
+    user: 1000:1000
     network_mode: host
-    # ports:
-    #   - 60001:60001
+
     restart: unless-stopped
